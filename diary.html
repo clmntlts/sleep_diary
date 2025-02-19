@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sleep Diary</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f4f4;
+            text-align: center;
+        }
+        .container {
+            width: 80%;
+            margin: auto;
+        }
+        .statistics {
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        .day {
+            background: white;
+            margin: 20px 0;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+            position: relative;
+            width: 100%;
+        }
+        .timeline {
+            position: relative;
+            background: #ddd;
+            height: 50px;
+            margin: 10px 0;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .marker {
+            position: absolute;
+            height: 50px;
+            width: 10px;
+            background: #007bff;
+            cursor: grab;
+        }
+        .sleepPeriod {
+            position: absolute;
+            background-color: green;
+            height: 50px;
+            cursor: pointer;
+            z-index: 1;
+        }
+        .resizeHandle {
+            position: absolute;
+            width: 10px;
+            height: 50px;
+            right: 0;
+            background-color: #444;
+            cursor: ew-resize;
+        }
+        .timeline-labels, .timeline-ticks {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Sleep Diary</h1>
+        <div class="statistics">
+            <h3>Statistics</h3>
+            <p>Time in Bed: <span id="avgTIB">0</span> hours</p>
+            <p>Sleep Time: <span id="avgSleep">0</span> hours</p>
+            <p>Sleep Efficiency: <span id="sleepEfficiency">0</span>%</p>
+            <p>Sleep Quality: <span id="avgSleepQuality">5</span></p>
+            <p>Morning Fatigue: <span id="avgMorningFatigue">5</span></p>
+        </div>
+        <button onclick="addDay()">Add Day</button>
+        <div id="diary"></div>
+    </div>
+
+    <script>
+        let dayCount = 0;
+
+        // Add a new day entry
+        function addDay() {
+            dayCount++;
+            const diary = document.getElementById("diary");
+            const dayDiv = document.createElement("div");
+            dayDiv.className = "day";
+            dayDiv.innerHTML = `
+                <h3>Day ${dayCount}</h3>
+                <div class="timeline-labels">
+                    <span>12 PM</span>
+                    <span>12 AM</span>
+                    <span>12 PM</span>
+                </div>
+                <div class="timeline" id="timeline${dayCount}">
+                    <div class="marker" id="bedtime${dayCount}" onmousedown="startDrag(event, 'bedtime${dayCount}', ${dayCount}, 'marker')"></div>
+                    <div class="marker" id="wakeTime${dayCount}" onmousedown="startDrag(event, 'wakeTime${dayCount}', ${dayCount}, 'marker')"></div>
+                </div>
+                <div class="timeline-ticks">
+                    ${Array.from({ length: 25 }, (_, i) => `<span>${(12 + i) % 24}:00</span>`).join('')}
+                </div>
+                <button onclick="addSleepPeriod(${dayCount})">Add Sleep Period</button>
+                <p>Time in Bed: <span id="timeInBed${dayCount}">0</span> hours</p>
+                <p>Total Sleep Time: <span id="totalSleep${dayCount}">0</span> hours</p>
+
+                <!-- Sleep quality VAS -->
+                <p>Sleep Quality: 
+                    <input type="range" min="0" max="10" step="1" id="sleepQuality${dayCount}" value="5" oninput="updateSleepQuality(${dayCount})">
+                    <span id="sleepQualityLabel${dayCount}">5</span>
+                </p>
+
+                <!-- Morning Fatigue VAS -->
+                <p>Morning Fatigue: 
+                    <input type="range" min="0" max="10" step="1" id="morningFatigue${dayCount}" value="5" oninput="updateMorningFatigue(${dayCount})">
+                    <span id="morningFatigueLabel${dayCount}">5</span>
+                </p>
+            `;
+            diary.appendChild(dayDiv);
+        }
+
+        // Start dragging (markers and sleep periods)
+        function startDrag(event, elementId, dayId, type) {
+            event.preventDefault();
+            const element = document.getElementById(elementId);
+            const parent = element.parentElement;
+            let shiftX = event.clientX - element.getBoundingClientRect().left;
+
+            function onMouseMove(event) {
+                let newLeft = event.clientX - shiftX - parent.getBoundingClientRect().left;
+
+                // Boundaries for markers and sleep periods
+                if (newLeft < 0) newLeft = 0;
+                if (newLeft > parent.clientWidth - element.offsetWidth) newLeft = parent.clientWidth - element.offsetWidth;
+
+                element.style.left = newLeft + 'px';
+
+                updateMarkerPositions(dayId); // Update marker positions as they move
+            }
+
+            document.addEventListener('mousemove', onMouseMove);
+
+            document.addEventListener('mouseup', () => {
+                document.removeEventListener('mousemove', onMouseMove);
+                updateStatistics(dayId); // Update stats after drag ends
+            }, { once: true });
+        }
+
+        // Update sleep quality for a specific day
+        function updateSleepQuality(dayId) {
+            const quality = document.getElementById(`sleepQuality${dayId}`).value;
+            document.getElementById(`sleepQualityLabel${dayId}`).textContent = quality;
+            updateStatistics(dayId);
+        }
+
+        // Update morning fatigue for a specific day
+        function updateMorningFatigue(dayId) {
+            const fatigue = document.getElementById(`morningFatigue${dayId}`).value;
+            document.getElementById(`morningFatigueLabel${dayId}`).textContent = fatigue;
+            updateStatistics(dayId);
+        }
+
+        // Create a new sleep period (movable and resizable)
+        function addSleepPeriod(dayId) {
+            const timeline = document.getElementById(`timeline${dayId}`);
+            const bedtime = document.getElementById(`bedtime${dayId}`);
+            const wakeTime = document.getElementById(`wakeTime${dayId}`);
+
+            // Get positions of bedtime and wakeTime markers on the timeline
+            const timelineWidth = timeline.offsetWidth;
+            const bedtimePosition = bedtime.offsetLeft / timelineWidth * 24;
+            const wakeTimePosition = wakeTime.offsetLeft / timelineWidth * 24;
+
+            // Calculate the sleep duration and position
+            const sleepDuration = (wakeTimePosition - bedtimePosition + 24) % 24;
+            const sleepStart = bedtimePosition * (timelineWidth / 24);
+            const sleepEnd = sleepStart + (sleepDuration * (timelineWidth / 24));
+
+            // Create sleep period div
+            const sleepPeriod = document.createElement('div');
+            sleepPeriod.className = 'sleepPeriod';
+            sleepPeriod.style.left = `${sleepStart}px`;
+            sleepPeriod.style.width = `${sleepEnd - sleepStart}px`;
+
+            // Store initial start position in a custom property
+            sleepPeriod.dataset.startPosition = sleepStart;
+
+            // Add resize handle
+            const resizeHandle = document.createElement('div');
+            resizeHandle.className = 'resizeHandle';
+            sleepPeriod.appendChild(resizeHandle);
+
+            resizeHandle.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                const startX = e.clientX;
+                const startWidth = sleepPeriod.offsetWidth; // Save initial width
+
+                function onMouseMove(e) {
+                    const deltaX = e.clientX - startX; // Calculate the change in mouse position
+                    const newWidth = startWidth + deltaX; // Adjust the width accordingly
+
+                    // Prevent resizing beyond the timeline's bounds
+                    if (newWidth >= 0 && newWidth <= timeline.offsetWidth - sleepPeriod.offsetLeft) {
+                        sleepPeriod.style.width = newWidth + 'px';
+                        updateSleepPeriod(sleepPeriod, dayId);
+                    }
+                }
+
+                document.addEventListener('mousemove', onMouseMove);
+
+                document.addEventListener('mouseup', () => {
+                    document.removeEventListener('mousemove', onMouseMove);
+                    updateStatistics(dayId); // Update stats after resize ends
+                }, { once: true });
+            });
+
+            // Make the sleep period div movable
+            sleepPeriod.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                const startX = e.clientX;
+                const startLeft = sleepPeriod.offsetLeft;
+
+                function onMouseMove(e) {
+                    const newLeft = startLeft + (e.clientX - startX);
+                    // Ensure the sleep period is within the bounds of the timeline (dayDiv)
+                    if (newLeft >= 0 && newLeft <= timeline.offsetWidth - sleepPeriod.offsetWidth) {
+                        sleepPeriod.style.left = newLeft + 'px';
+                        updateSleepPeriod(sleepPeriod, dayId);
+                    }
+                }
+
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', () => {
+                    document.removeEventListener('mousemove', onMouseMove);
+                    updateStatistics(dayId);
+                }, { once: true });
+            });
+
+            // Add the sleep period to the timeline
+            timeline.appendChild(sleepPeriod);
+
+            updateGlobalStatistics(); // Update global stats
+        }
+
+        // Update sleep period information and statistics
+        function updateSleepPeriod(sleepPeriod, dayId) {
+            const timelineWidth = document.getElementById(`timeline${dayId}`).offsetWidth;
+            const sleepStart = sleepPeriod.dataset.startPosition;  // Keep the start position fixed
+            const sleepEnd = (sleepPeriod.offsetLeft + sleepPeriod.offsetWidth) / timelineWidth * 24;
+
+            let totalSleep = (sleepEnd - sleepStart + 24) % 24;
+            document.getElementById(`totalSleep${dayId}`).textContent = totalSleep.toFixed(1);
+        }
+
+        // Update global statistics (averages including VAS)
+        function updateGlobalStatistics() {
+            let totalTIB = 0, totalSleep = 0, totalSleepQuality = 0, totalMorningFatigue = 0, days = 0;
+            for (let i = 1; i <= dayCount; i++) {
+                const timeInBed = parseFloat(document.getElementById(`timeInBed${i}`).textContent);
+                const sleepQuality = parseInt(document.getElementById(`sleepQuality${i}`).value);
+                const morningFatigue = parseInt(document.getElementById(`morningFatigue${i}`).value);
+
+                if (!isNaN(timeInBed)) {
+                    totalTIB += timeInBed;
+                    totalSleepQuality += sleepQuality;
+                    totalMorningFatigue += morningFatigue;
+                    days++;
+                }
+            }
+            if (days > 0) {
+                document.getElementById("avgTIB").textContent = (totalTIB / days).toFixed(1);
+                document.getElementById("avgSleepQuality").textContent = (totalSleepQuality / days).toFixed(1);
+                document.getElementById("avgMorningFatigue").textContent = (totalMorningFatigue / days).toFixed(1);
+            }
+        }
+    </script>
+</body>
+</html>
