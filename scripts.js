@@ -23,13 +23,11 @@ function addDay() {
         <button onclick="addSleepPeriod(${dayCount})">Add Sleep Period</button>
         <p>Time in Bed: <span id="timeInBed${dayCount}">0</span> hours</p>
         <p>Total Sleep Time: <span id="totalSleep${dayCount}">0</span> hours</p>
-
         <!-- Sleep quality VAS -->
         <p>Sleep Quality: 
             <input type="range" min="0" max="10" step="1" id="sleepQuality${dayCount}" value="5" oninput="updateSleepQuality(${dayCount})">
             <span id="sleepQualityLabel${dayCount}">5</span>
         </p>
-
         <!-- Morning Fatigue VAS -->
         <p>Morning Fatigue: 
             <input type="range" min="0" max="10" step="1" id="morningFatigue${dayCount}" value="5" oninput="updateMorningFatigue(${dayCount})">
@@ -224,35 +222,48 @@ function updateStatistics(dayId) {
     const bedtime = document.getElementById(`bedtime${dayId}`);
     const wakeTime = document.getElementById(`wakeTime${dayId}`);
     const timeInBedElement = document.getElementById(`timeInBed${dayId}`);
-
+    
     const timelineWidth = timeline.offsetWidth;
     const bedtimePosition = bedtime.offsetLeft / timelineWidth * 24;
     const wakeTimePosition = wakeTime.offsetLeft / timelineWidth * 24;
 
+    // Calculate Time in Bed (from bedtime to wake time)
     let timeInBed = (wakeTimePosition - bedtimePosition + 24) % 24;
+    timeInBedElement.textContent = timeInBed.toFixed(1);
 
-    timeInBedElement.textContent = timeInBed.toFixed(1); // Display Time in Bed
+    // Calculate total sleep time
+    let totalSleep = 0;
+    const sleepPeriods = timeline.getElementsByClassName('sleepPeriod');
+    for (const sleepPeriod of sleepPeriods) {
+        const sleepStart = sleepPeriod.dataset.startPosition;
+        const sleepEnd = (sleepPeriod.offsetLeft + sleepPeriod.offsetWidth) / timelineWidth * 24;
+        totalSleep += (sleepEnd - sleepStart + 24) % 24;
+    }
+    document.getElementById(`totalSleep${dayId}`).textContent = totalSleep.toFixed(1);
 
-    // Update other stats as needed (Sleep Quality, Fatigue, etc.)
-    updateSleepQuality(dayId);
-    updateMorningFatigue(dayId);
+    updateGlobalStatistics(); // Update global statistics
 }
 
-// Global statistics for the entire diary
+// Update global statistics (averages including VAS)
 function updateGlobalStatistics() {
-    let totalTimeInBed = 0;
-    let totalSleepTime = 0;
+    let totalTIB = 0, totalSleep = 0, totalSleepQuality = 0, totalMorningFatigue = 0, days = 0;
+    for (let i = 1; i <= dayCount; i++) {
+        const timeInBed = parseFloat(document.getElementById(`timeInBed${i}`).textContent);
+        const sleepQuality = parseInt(document.getElementById(`sleepQuality${i}`).value);
+        const morningFatigue = parseInt(document.getElementById(`morningFatigue${i}`).value);
 
-    const allDays = document.querySelectorAll('.day');
-    allDays.forEach(day => {
-        const timeInBed = parseFloat(day.querySelector('.timeInBed').textContent);
-        const totalSleep = parseFloat(day.querySelector('.totalSleep').textContent);
-
-        totalTimeInBed += timeInBed;
-        totalSleepTime += totalSleep;
-    });
-
-    document.getElementById('totalTimeInBed').textContent = totalTimeInBed.toFixed(1);
-    document.getElementById('totalSleepTime').textContent = totalSleepTime.toFixed(1);
+        if (!isNaN(timeInBed)) {
+            totalTIB += timeInBed;
+            totalSleep += parseFloat(document.getElementById(`totalSleep${i}`).textContent);
+            totalSleepQuality += sleepQuality;
+            totalMorningFatigue += morningFatigue;
+            days++;
+        }
+    }
+    if (days > 0) {
+        document.getElementById("avgTIB").textContent = (totalTIB / days).toFixed(1);
+        document.getElementById("avgSleep").textContent = (totalSleep / days).toFixed(1);
+        document.getElementById("avgSleepQuality").textContent = (totalSleepQuality / days).toFixed(1);
+        document.getElementById("avgMorningFatigue").textContent = (totalMorningFatigue / days).toFixed(1);
+    }
 }
-
