@@ -1,9 +1,9 @@
-// Import Supabase SDK
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+// Initialize Supabase without import
+const { createClient } = window.supabase;
 
-// Supabase Credentials (Replace with your project details)
-const SUPABASE_URL = "https://wvdggsrxtjdlfezenbbz.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind2ZGdnc3J4dGpkbGZlemVuYmJ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDAwNDc5NDcsImV4cCI6MjA1NTYyMzk0N30.4hJtANpuD5xx_J0Ukk6QoqTcnbV0gkjMeD2HcP5QxB8";
+// Supabase credentials (replace with your actual keys)
+const SUPABASE_URL = "https://your-project-id.supabase.co";
+const SUPABASE_ANON_KEY = "your-anon-key";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Sign Up Function
@@ -11,12 +11,12 @@ async function signUp() {
     const email = document.getElementById("signup-email").value;
     const password = document.getElementById("signup-password").value;
 
-    const { user, error } = await supabase.auth.signUp({ email, password });
+    const { error } = await supabase.auth.signUp({ email, password });
 
     if (error) {
         alert("Error: " + error.message);
     } else {
-        alert("Signup successful! Please check your email for verification.");
+        alert("Signup successful! Check your email for verification.");
     }
 }
 
@@ -25,7 +25,7 @@ async function login() {
     const email = document.getElementById("login-email").value;
     const password = document.getElementById("login-password").value;
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
         alert("Login failed: " + error.message);
@@ -49,7 +49,6 @@ async function logout() {
     await supabase.auth.signOut();
     alert("You have logged out.");
 }
-
 
 
 
