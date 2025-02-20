@@ -1,6 +1,5 @@
 // Initialize Supabase without import
 const { createClient } = window.supabase;
-
 // Supabase credentials (replace with your actual keys)
 const SUPABASE_URL = "https://your-project-id.supabase.co";
 const SUPABASE_ANON_KEY = "your-anon-key";
