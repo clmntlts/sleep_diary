@@ -786,9 +786,8 @@ function resetGlobalStatistics() {
     if (document.getElementById("avgMorningFatigue")) document.getElementById("avgMorningFatigue").textContent = '0';
 }
 
-// --- Supabase Data Persistence ---
 async function saveSleepRecordToSupabase(dayId) {
-     // CRITICAL CHECK: Ensure user is logged in before saving
+    // CRITICAL CHECK: Ensure user is logged in before saving
     if (!currentUserId || !supabase) {
         console.error("Cannot save sleep record: User not logged in or Supabase client not initialized.");
          displayAuthMessage("Save failed: You are not logged in.", "error");
@@ -809,7 +808,7 @@ async function saveSleepRecordToSupabase(dayId) {
 
 
     if (!timeline || !bedtimeMarker || !wakeTimeMarker || timeline.offsetWidth === 0 || !sleepQualitySlider || !morningFatigueSlider) {
-         console.warn(`Elements for day ${dayId} not ready for save (timeline width 0 or markers missing).`);
+         console.warn(`Elements for day ${dayId} not ready for save (timeline width 0 or markers/sliders missing).`);
         return;
     }
 
@@ -842,23 +841,32 @@ async function saveSleepRecordToSupabase(dayId) {
          return;
      }
 
-
+    // Get the existing database ID from the element if it exists
     let recordDbId = dayEntryElement.dataset.dbId;
+
+    // Create the final payload for upsert
+    const finalPayload = recordPayload;
+    // If we have an existing DB ID for this record, add it to the payload
+    // This tells upsert to try and update the row with this ID
+    if (recordDbId) {
+        // CORRECTION: DO NOT use parseInt() on a UUID. Pass the string UUID directly.
+        finalPayload.id = recordDbId;
+    }
+
 
     // Attempt to upsert the sleep_record
     const { data: savedRecord, error: recordError } = await supabase
         .from('sleep_record')
-        // Use onConflict: 'id' if ID is the primary key and you are passing it for updates,
-        // OR use onConflict: 'user_id, day_count' if that pair is a unique constraint.
-        // The error message suggests 'user_id' and 'day_count' might be the intended unique pair for upsert logic.
-        .upsert(recordDbId ? { ...recordPayload, id: parseInt(recordDbId) } : recordPayload, { onConflict: 'user_id, day_count', ignoreDuplicates: false })
-        .select('id') // Select the resulting ID
+        // Use the prepared finalPayload
+        // onConflict: 'user_id, day_count' ensures that if a record with the same user_id and day_count exists, it gets updated instead of inserting a duplicate.
+        .upsert(finalPayload, { onConflict: 'user_id, day_count', ignoreDuplicates: false })
+        .select('id') // Select the resulting ID to get the actual DB ID if it was inserted or updated
         .single();
 
 
     if (recordError) {
         console.error('Error saving sleep record:', recordError);
-        // Check if the error is the FK violation for user_id
+        // Check if the error is the FK violation for user_id (the previous error)
         if (recordError.code === '23503' && recordError.constraint === 'sleep_record_user_id_fkey') {
              displayAuthMessage('Save failed: User account issue. Please try logging out and back in.', 'error');
         } else {
@@ -866,16 +874,17 @@ async function saveSleepRecordToSupabase(dayId) {
         }
     } else if (savedRecord && savedRecord.id) {
         const newRecordDbId = savedRecord.id;
-        dayEntryElement.dataset.dbId = newRecordDbId; // Store/update the DB ID on the DOM element
+        // Update the dataset attribute with the correct UUID returned by Supabase
+        dayEntryElement.dataset.dbId = newRecordDbId;
         console.log(`Sleep record for day ${dayId} saved/updated with DB ID: ${newRecordDbId}`);
-        // Now save the associated sleep periods
+        // Now save the associated sleep periods, passing the correct UUID for the record
         await saveSleepPeriodsToSupabase(dayId, newRecordDbId);
          // Optional: Add a temporary visual confirmation
          dayEntryElement.classList.add('border-green-500');
          setTimeout(() => dayEntryElement.classList.remove('border-green-500'), 1000);
          displayAuthMessage("Sleep diary saved.", "success"); // Give success message after periods save
     } else {
-         // Should not happen if upsert succeeds, but handle defensively
+         // This case should ideally not happen if upsert is successful and returns 'id'
          console.error("Upsert succeeded but did not return an ID for day", dayId);
          displayAuthMessage("Save completed, but could not retrieve record ID.", "warning");
     }
