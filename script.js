@@ -790,25 +790,24 @@ async function saveSleepRecordToSupabase(dayId) {
     // CRITICAL CHECK: Ensure user is logged in before saving
     if (!currentUserId || !supabase) {
         console.error("Cannot save sleep record: User not logged in or Supabase client not initialized.");
-         displayAuthMessage("Save failed: You are not logged in.", "error");
+        displayAuthMessage("Save failed: You are not logged in.", "error");
         return;
     }
 
     const dayEntryElement = document.getElementById(`dayEntry${dayId}`);
     if (!dayEntryElement) {
-         console.error(`Cannot save sleep record: Day entry element not found for day ID ${dayId}.`);
+        console.error(`Cannot save sleep record: Day entry element not found for day ID ${dayId}.`);
         return;
     }
 
     const timeline = document.getElementById(`timeline${dayId}`);
     const bedtimeMarker = document.getElementById(`bedtime${dayId}`);
     const wakeTimeMarker = document.getElementById(`wakeTime${dayId}`);
-     const sleepQualitySlider = document.getElementById(`sleepQuality${dayId}`);
-     const morningFatigueSlider = document.getElementById(`morningFatigue${dayId}`);
-
+    const sleepQualitySlider = document.getElementById(`sleepQuality${dayId}`);
+    const morningFatigueSlider = document.getElementById(`morningFatigue${dayId}`);
 
     if (!timeline || !bedtimeMarker || !wakeTimeMarker || timeline.offsetWidth === 0 || !sleepQualitySlider || !morningFatigueSlider) {
-         console.warn(`Elements for day ${dayId} not ready for save (timeline width 0 or markers/sliders missing).`);
+        console.warn(`Elements for day ${dayId} not ready for save (timeline width 0 or markers/sliders missing).`);
         return;
     }
 
@@ -816,43 +815,51 @@ async function saveSleepRecordToSupabase(dayId) {
     const bedtimePercent = bedtimeMarker.offsetLeft / timelineWidthPx;
     const wakeTimePercent = wakeTimeMarker.offsetLeft / timelineWidthPx;
 
-     const dayCountInt = parseInt(dayId);
-     if (isNaN(dayCountInt)) {
-         console.error(`Invalid day ID "${dayId}" for saving.`);
-         return;
-     }
+    const dayCountInt = parseInt(dayId);
+    if (isNaN(dayCountInt)) {
+        console.error(`Invalid day ID "${dayId}" for saving.`);
+        return;
+    }
 
     const recordPayload = {
         user_id: currentUserId,
         day_count: dayCountInt, // Ensure day_count is an integer
         bedtime: percentToTimeStr(bedtimePercent),
         wake_time: percentToTimeStr(wakeTimePercent),
-         // Retrieve calculated values from the UI spans
+        // Retrieve calculated values from the UI spans
         time_in_bed: parseFloat(document.getElementById(`timeInBed${dayId}`).textContent),
         sleep_quality: parseInt(sleepQualitySlider.value),
         morning_fatigue: parseInt(morningFatigueSlider.value),
         // created_at and updated_at can be handled by Supabase (e.g. default now())
     };
 
-     // Check for invalid calculated values before saving
-     if (isNaN(recordPayload.time_in_bed) || isNaN(recordPayload.sleep_quality) || isNaN(recordPayload.morning_fatigue)) {
-         console.error(`Calculated values for day ${dayId} are invalid, skipping save.`, recordPayload);
-         displayAuthMessage(`Error: Invalid data calculated for Day ${dayId}. Save aborted.`, 'error');
-         return;
-     }
+    // Check for invalid calculated values before saving
+    if (isNaN(recordPayload.time_in_bed) || isNaN(recordPayload.sleep_quality) || isNaN(recordPayload.morning_fatigue)) {
+        console.error(`Calculated values for day ${dayId} are invalid, skipping save.`, recordPayload);
+        displayAuthMessage(`Error: Invalid data calculated for Day ${dayId}. Save aborted.`, 'error');
+        return;
+    }
 
     // Get the existing database ID from the element if it exists
     let recordDbId = dayEntryElement.dataset.dbId;
 
-    // Create the final payload for upsert
-    const finalPayload = recordPayload;
-    // If we have an existing DB ID for this record, add it to the payload
-    // This tells upsert to try and update the row with this ID
-    if (recordDbId) {
-        // CORRECTION: DO NOT use parseInt() on a UUID. Pass the string UUID directly.
-        finalPayload.id = recordDbId;
+    // *** ADDED DEFENSIVE CHECK HERE ***
+    // If recordDbId exists but is not a string or doesn't look like a UUID format,
+    // assume it's invalid and treat this as a new record for the upsert.
+    // UUID format: 8-4-4-4-12 hexadecimal characters.
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (recordDbId && (typeof recordDbId !== 'string' || !uuidRegex.test(recordDbId))) {
+        console.warn(`Day ${dayId}: Invalid value "${recordDbId}" found in dataset.dbId. Expected UUID string. Treating as a new record.`);
+        recordDbId = null; // Force an insert attempt
     }
 
+    const finalPayload = recordPayload;
+    // If we have an existing DB ID for this record (and it's valid), add it to the payload
+    // This tells upsert to try and update the row with this ID
+    if (recordDbId) {
+        // Pass the UUID string directly (this was corrected previously)
+        finalPayload.id = recordDbId;
+    }
 
     // Attempt to upsert the sleep_record
     const { data: savedRecord, error: recordError } = await supabase
@@ -863,13 +870,15 @@ async function saveSleepRecordToSupabase(dayId) {
         .select('id') // Select the resulting ID to get the actual DB ID if it was inserted or updated
         .single();
 
-
     if (recordError) {
         console.error('Error saving sleep record:', recordError);
         // Check if the error is the FK violation for user_id (the previous error)
         if (recordError.code === '23503' && recordError.constraint === 'sleep_record_user_id_fkey') {
              displayAuthMessage('Save failed: User account issue. Please try logging out and back in.', 'error');
-        } else {
+        } else if (recordError.code === '22P02') { // Specific check for the 'invalid input syntax' error code
+             displayAuthMessage('Save failed: Data format error. Please check day data.', 'error');
+        }
+        else {
              displayAuthMessage('Error saving day data: ' + recordError.message, 'error');
         }
     } else if (savedRecord && savedRecord.id) {
@@ -878,15 +887,16 @@ async function saveSleepRecordToSupabase(dayId) {
         dayEntryElement.dataset.dbId = newRecordDbId;
         console.log(`Sleep record for day ${dayId} saved/updated with DB ID: ${newRecordDbId}`);
         // Now save the associated sleep periods, passing the correct UUID for the record
+        // The saveSleepPeriodsToSupabase function expects a valid UUID string here
         await saveSleepPeriodsToSupabase(dayId, newRecordDbId);
-         // Optional: Add a temporary visual confirmation
-         dayEntryElement.classList.add('border-green-500');
-         setTimeout(() => dayEntryElement.classList.remove('border-green-500'), 1000);
-         displayAuthMessage("Sleep diary saved.", "success"); // Give success message after periods save
+        // Optional: Add a temporary visual confirmation
+        dayEntryElement.classList.add('border-green-500');
+        setTimeout(() => dayEntryElement.classList.remove('border-green-500'), 1000);
+        displayAuthMessage("Sleep diary saved.", "success"); // Give success message after periods save
     } else {
-         // This case should ideally not happen if upsert is successful and returns 'id'
-         console.error("Upsert succeeded but did not return an ID for day", dayId);
-         displayAuthMessage("Save completed, but could not retrieve record ID.", "warning");
+        // This case should ideally not happen if upsert is successful and returns 'id'
+        console.error("Upsert succeeded but did not return an ID for day", dayId);
+        displayAuthMessage("Save completed, but could not retrieve record ID.", "warning");
     }
 }
 
