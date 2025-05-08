@@ -1,7 +1,7 @@
 // --- Supabase Initialization ---
 // IMPORTANT: Replace with your actual Supabase URL and Anon Key
 const SUPABASE_URL = "https://wvdggsrxtjdlfezenbbz.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind2ZGdnc3J4dGpkbGZlemVuYmJ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDAwNDc5NDcsImV4cCI6MjA1NTYyMzk0N30.4hJtANpuD5xx_J0Ukk6QoqTcnV0gkjMeD2HcP5QxB8"; // Adjusted key slightly for example, use original
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind2ZGdnc3J4dGpkbGZlemVuYmJ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDAwNDc5NDcsImV4cCI6MjA1NTYyMzk0N30.4hJtANpuD5xx_J0Ukk6QoqTcnbV0gkjMeD2HcP5QxB8"; // Adjusted key slightly for example, use original
 // NOTE: The key you provided looks like a placeholder/example key, not a real anon key.
 // Make sure you replace this with your project's actual Anon Key from Supabase Project Settings -> API.
 
