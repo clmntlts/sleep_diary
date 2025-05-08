@@ -1,71 +1,208 @@
+/* Ensure body takes full height and uses Inter font */
 body {
-    font-family: Arial, sans-serif;
-    background: #f4f4f4;
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background-color: #f3f4f6; /* Tailwind gray-100 */
+}
+
+/* Container for overall layout */
+.container {
+    flex-grow: 1;
+}
+
+/* Styling for each day entry (complementing Tailwind) */
+.day {
+    /* Base styles are applied via Tailwind in HTML/JS */
+    /* Add any specific overrides or complex styles here if needed */
+}
+
+.day h3 {
+    /* Tailwind: text-xl font-semibold text-indigo-600 mb-3 border-b pb-2 */
+}
+
+/* Timeline styles */
+.timeline-container {
+    position: relative;
+    margin-bottom: 1rem;
+}
+
+.timeline-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem; /* text-xs */
+    color: #6b7280; /* gray-500 */
+    margin-bottom: 0.25rem;
+    padding: 0 10px; /* Align with marker padding if any */
+}
+.timeline-labels span {
+    flex: 1;
     text-align: center;
 }
+.timeline-labels span:first-child { text-align: left; }
+.timeline-labels span:last-child { text-align: right; }
 
-.container {
-    width: 80%;
-    margin: auto;
-}
-
-.statistics {
-    background: white;
-    padding: 15px;
-    border-radius: 5px;
-    box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
-    margin-bottom: 20px;
-}
-
-.day {
-    background: white;
-    margin: 20px 0;
-    padding: 20px;
-    border-radius: 5px;
-    box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
-    position: relative;
-    width: 100%;
-}
 
 .timeline {
     position: relative;
-    background: #ddd;
-    height: 50px;
-    margin: 10px 0;
-    user-select: none;
+    width: 100%;
+    height: 32px; /* Increased height for better interaction */
+    background-color: #e5e7eb; /* gray-200 */
+    border-radius: 6px;
+    cursor: default;
     display: flex;
     align-items: center;
-    justify-content: space-between;
 }
 
-.marker {
-    position: absolute;
-    height: 50px;
-    width: 10px;
-    background: #007bff;
-    cursor: grab;
-}
-
-.sleepPeriod {
-    position: absolute;
-    background-color: green;
-    height: 50px;
-    cursor: pointer;
-    z-index: 1;
-}
-
-.resizeHandle {
-    position: absolute;
-    width: 10px;
-    height: 50px;
-    right: 0;
-    background-color: #444;
-    cursor: ew-resize;
-}
-
-.timeline-labels, .timeline-ticks {
+.timeline-ticks {
     display: flex;
     justify-content: space-between;
-    font-size: 12px;
-    color: #555;
+    font-size: 0.70rem; /* Smaller text for ticks */
+    color: #9ca3af; /* gray-400 */
+    margin-top: 0.25rem;
+    padding: 0 5px;
+    overflow: hidden;
+}
+.timeline-ticks span {
+    flex-basis: 0;
+    flex-grow: 1;
+    text-align: center;
+    white-space: nowrap;
+    position: relative; /* For fine-tuning tick mark lines if desired */
+}
+/* Optional: Add small tick lines */
+/* .timeline-ticks span::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -5px;
+    height: 5px;
+    width: 1px;
+    background-color: #d1d5db; // gray-300
+} */
+
+
+/* Marker (bedtime/wakeTime) styles */
+.marker {
+    position: absolute;
+    top: 0; /* Align to top of timeline */
+    bottom: 0; /* Stretch to bottom of timeline */
+    width: 12px;
+    /* background-color is set inline or by specific ID for differentiation */
+    border-radius: 3px;
+    cursor: ew-resize;
+    z-index: 10;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+    border: 1px solid rgba(0,0,0,0.1);
+}
+
+/* Specific marker colors (can be overridden by JS if needed) */
+/* Default colors are now set in addDay() in JS */
+
+
+/* Sleep period styles */
+.sleepPeriod {
+    position: absolute;
+    top: 15%; /* Position within the timeline vertically */
+    height: 70%; /* Covers most of the timeline height */
+    background-color: rgba(79, 70, 229, 0.6); /* Semi-transparent indigo-600 */
+    border: 1px solid #4338ca; /* Solid indigo-700 border */
+    border-radius: 4px;
+    cursor: move;
+    z-index: 5;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    overflow: hidden; /* Prevent handles from visually overflowing too much if very small */
+}
+
+/* Resize handle styles */
+.resizeHandle {
+    width: 10px; /* Slightly wider for easier touch */
+    height: 100%;
+    background-color: rgba(67, 56, 202, 0.8); /* Darker indigo for handles */
+    cursor: ew-resize;
+    z-index: 15; /* Above sleep period */
+    /* No border-radius on handles themselves, they are part of the sleepPeriod */
+}
+.resizeHandle.resizeStart {
+    /* Positioned by JS or could be absolute left:0 */
+}
+.resizeHandle.resizeEnd {
+    /* Positioned by JS or could be absolute right:0 */
+}
+
+/* Input range (slider) styling - using Tailwind accent color */
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 8px;
+    background: #d1d5db; /* gray-300 */
+    border-radius: 5px;
+    outline: none;
+    opacity: 0.9;
+    transition: opacity .2s;
+    margin-top: 0.25rem;
+    margin-bottom: 0.25rem;
+}
+
+input[type="range"]:hover {
+    opacity: 1;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px; /* Slightly larger thumb */
+    height: 20px;
+    /* background: #4f46e5; /* indigo-600 - This is controlled by accent-indigo-600 in HTML */
+    border-radius: 50%;
+    cursor: pointer;
+    border: 3px solid white; /* White border for better visibility */
+    box-shadow: 0 0 3px rgba(0,0,0,0.2);
+}
+
+input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    /* background: #4f46e5; /* indigo-600 */
+    border-radius: 50%;
+    cursor: pointer;
+    border: 3px solid white;
+    box-shadow: 0 0 3px rgba(0,0,0,0.2);
+}
+
+/* General paragraph styling within day entries (mostly Tailwind) */
+.day p {
+    /* Tailwind: mb-3 text-sm text-gray-700 */
+}
+.day p span {
+    /* Tailwind: font-semibold text-gray-800 */
+}
+
+/* Button styling (for dynamically added buttons if not using Tailwind classes in JS) */
+.day button.addSleepPeriodButton, .day button.deleteDayButton {
+    /* Tailwind classes are applied directly in JS innerHTML */
+    /* Example: bg-teal-500 hover:bg-teal-600 text-white font-medium py-2 px-4 rounded-md text-sm */
+}
+
+
+/* Message area for auth feedback */
+#authMessage.success {
+    background-color: #dcfce7; /* Tailwind green-100 */
+    color: #166534; /* Tailwind green-800 */
+    border: 1px solid #86efac; /* Tailwind green-300 */
+}
+#authMessage.error {
+    background-color: #fee2e2; /* Tailwind red-100 */
+    color: #991b1b; /* Tailwind red-800 */
+    border: 1px solid #fca5a5; /* Tailwind red-300 */
+}
+
+/* Hide elements by default if needed */
+.hidden {
+    display: none !important; /* Ensure it overrides other display properties */
 }
