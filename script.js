@@ -934,30 +934,29 @@ async function saveSleepPeriodsToSupabase(dayId, sleepRecordDbId) {
     const periodsToSave = [];
 
     sleepPeriodElements.forEach(el => {
-         // Calculate start/end percentages based on current element position and size
-        const startPercent = el.offsetLeft / timelineWidthPx;
-        const endPercent = (el.offsetLeft + el.offsetWidth) / timelineWidthPx; // End is start + width
+    // Calculate start/end percentages based on current element position and size
+    const startPercent = el.offsetLeft / timelineWidthPx;
+    const endPercent = (el.offsetLeft + el.offsetWidth) / timelineWidthPx; // End is start + width
 
-         // Ensure percentages are within [0, 1] and handle wrap-around for duration calculation
-         const startPercentNormalized = (startPercent % 1 + 1) % 1;
-         const endPercentNormalized = (endPercent % 1 + 1) % 1;
+    // Ensure percentages are within [0, 1] and handle wrap-around for duration calculation
+    const startPercentNormalized = (startPercent % 1 + 1) % 1;
+    const endPercentNormalized = (endPercent % 1 + 1) % 1;
 
-
-        periodsToSave.push({
-             // Link the period to the sleep_record
-            sleep_record_id: sleepRecordDbId,
-             // Include user_id and day_count if your sleep_periods table requires them (e.g., for RLS)
-            user_id: currentUserId,
-            day_count: parseInt(dayId), // Ensure day_count is an integer
-             // Client-side sequential ID
-            period_id: parseInt(el.dataset.periodId),
-             // Store time strings calculated from percentage positions
-            start_time: percentToTimeStr(startPercent),
-            end_time: percentToTimeStr(endPercent),
-             // Calculate and store the duration based on normalized percentages
-            duration: calculateHoursFromPercents(startPercentNormalized, endPercentNormalized)
-        });
+    periodsToSave.push({
+        // Link the period to the sleep_record
+        sleep_record_id: sleepRecordDbId,
+        // Include user_id if your sleep_periods table requires them (e.g., for RLS)
+        user_id: currentUserId,
+        // REMOVE day_count: parseInt(dayId),
+        // Client-side sequential ID
+        period_id: parseInt(el.dataset.periodId),
+        // Store time strings calculated from percentage positions
+        start_time: percentToTimeStr(startPercent),
+        end_time: percentToTimeStr(endPercent),
+        // Calculate and store the duration based on normalized percentages
+        duration: calculateHoursFromPercents(startPercentNormalized, endPercentNormalized)
     });
+});
 
     if (periodsToSave.length > 0) {
          console.log(`Saving ${periodsToSave.length} sleep periods for record ${sleepRecordDbId}:`, periodsToSave);
