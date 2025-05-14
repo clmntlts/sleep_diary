@@ -1,7 +1,9 @@
 // --- Supabase Initialization ---
 // IMPORTANT: Replace with your actual Supabase URL and Anon Key
 const SUPABASE_URL = "https://wvdggsrxtjdlfezenbbz.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind2ZGdnc3J4dGpkbGZlemVuYmJ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDAwNDc5NDcsImV4cCI6MjA1NTYyMzk0N30.4hJtANpuD5xx_J0Ukk6QoqTcnbV0gkjMeD2HcP5QxB8";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind2ZGdnc3J4dGpkbGZlemVuYmJ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDAwNDc5NDcsImV4cCI6MjA1NTYyMzk0N30.4hJtANpuD5xx_J0Ukk6QoqTcnbV0gkjMeD2HcP5QxB8"; // Adjusted key slightly for example, use original
+// NOTE: The key you provided looks like a placeholder/example key, not a real anon key.
+// Make sure you replace this with your project's actual Anon Key from Supabase Project Settings -> API.
 
 let supabase;
 try {
@@ -35,6 +37,7 @@ const diaryDiv = document.getElementById("diary");
 let localDayCounter = 0; // Used for generating new day numbers if no data loaded
 let currentUserId = null;
 let activeDrags = 0; // Counter for active drag operations to prevent premature saves
+let saveTimeoutId = null; // To debounce saves during dragging
 
 // --- Time Conversion Constants and Utilities ---
 // Timeline represents 24 hours starting from 12:00 PM (noon)
@@ -89,6 +92,10 @@ function timeStrToPercent(timeStr) {
  */
 function calculateHoursFromPercents(startPercent, endPercent) {
     let durationPercent;
+    // Normalize percentages to be within [0, 1) range
+    startPercent = (startPercent % 1 + 1) % 1;
+    endPercent = (endPercent % 1 + 1) % 1;
+
     if (endPercent >= startPercent) {
         durationPercent = endPercent - startPercent;
     } else {
@@ -134,6 +141,7 @@ async function handleSignUp() {
     } else {
         // data.user contains the user object. data.session might be null if email confirmation is required.
         displayAuthMessage("Signup successful! Check your email for verification. You can then log in.", "success");
+        // The onAuthStateChange listener will handle UI updates if auto-signed-in.
     }
 }
 
@@ -183,21 +191,61 @@ function updateUserUI(user) {
         if (authFormsDiv) authFormsDiv.classList.remove("hidden");
         if (logoutButton) logoutButton.classList.add("hidden");
         if (addDayButton) addDayButton.disabled = true;
-        if (diaryDiv) diaryDiv.innerHTML = '';
+        if (diaryDiv) diaryDiv.innerHTML = ''; // Clear existing diary entries
         resetGlobalStatistics();
-        localDayCounter = 0;
+        localDayCounter = 0; // Reset day counter on logout
     }
 }
+
+// --- NEW: Load User Data Function ---
+async function loadUserData() {
+    if (!currentUserId || !supabase) {
+        console.warn("Cannot load user data: user not logged in or supabase client not initialized.");
+        return;
+    }
+
+    console.log("Attempting to load user data for:", currentUserId);
+    displayAuthMessage("Loading sleep diary...", "info");
+    // IMPORTANT: This query assumes you have a foreign key constraint
+    // from 'sleep_periods' to 'sleep_record' in your database schema.
+    // E.g., 'sleep_periods' has a column 'sleep_record_id' referencing 'sleep_record.id'.
+    // If your schema is different, the select syntax or loading logic needs adjustment.
+    const { data: records, error } = await supabase
+        .from('sleep_record')
+        .select('*, sleep_periods(*)') // This line requires the FK relationship for PGRST200 error fix
+        .eq('user_id', currentUserId)
+        .order('day_count', { ascending: false }); // Order by day_count
+
+    if (error) {
+        console.error("Error loading user data:", error);
+        displayAuthMessage("Error loading sleep diary: " + error.message, "error");
+    } else {
+        console.log("User data loaded:", records);
+        if (diaryDiv) diaryDiv.innerHTML = ''; // Clear current view before loading
+        localDayCounter = 0; // Reset counter before populating
+        if (records && records.length > 0) {
+            // Find the highest day_count from loaded records to continue numbering
+            localDayCounter = Math.max(...records.map(r => r.day_count));
+            records.forEach(record => addDay(record));
+            displayAuthMessage(`Loaded ${records.length} day(s).`, "success");
+        } else {
+            displayAuthMessage("No sleep diary data found. Add a day to get started!", "info");
+        }
+         updateGlobalStatistics(); // Calculate and display global stats after loading
+    }
+}
+
 
 // --- Diary Core Logic ---
 
 /**
  * Adds a new day entry to the UI.
  * If recordData is provided, it populates the day with that data (used when loading from DB).
- * @param {object|null} recordData - Optional data to populate the new day (from sleep_record table).
+ * @param {object|null} recordData - Optional data to populate the new day (from sleep_record table, possibly including nested sleep_periods).
  */
 function addDay(recordData = null) {
     const dayNumber = recordData ? recordData.day_count : ++localDayCounter;
+    // Ensure localDayCounter is at least the loaded day_count if loading
     if (recordData && recordData.day_count > localDayCounter) {
         localDayCounter = recordData.day_count;
     }
@@ -211,6 +259,7 @@ function addDay(recordData = null) {
     }
 
     // Default values or values from recordData
+    // Note: Storing time as HH:MM:SS string in DB, convert to percent for UI
     const initialBedtimePercent = recordData ? timeStrToPercent(recordData.bedtime) : 0.25; // Default 6 PM (0.25 on 12PM-12PM scale)
     const initialWakeTimePercent = recordData ? timeStrToPercent(recordData.wake_time) : 0.75; // Default 6 AM (0.75 on 12PM-12PM scale)
     const initialSleepQuality = recordData?.sleep_quality ?? 5;
@@ -244,6 +293,8 @@ function addDay(recordData = null) {
             </div>
         </div>
         <div class="space-y-1 text-sm mb-4 p-3 bg-gray-50 rounded-md">
+            <p>Bedtime: <span id="bedtimeDisplay${dayNumber}" class="font-semibold">--:--</span></p>
+            <p>Wake Time: <span id="wakeTimeDisplay${dayNumber}" class="font-semibold">--:--</span></p>
             <p>Time in Bed: <span id="timeInBed${dayNumber}" class="font-semibold">0</span> hours</p>
             <p>Total Sleep Time: <span id="totalSleep${dayNumber}" class="font-semibold">0</span> hours</p>
             <p>Sleep Efficiency: <span id="daySleepEfficiency${dayNumber}" class="font-semibold">0</span>%</p>
@@ -269,17 +320,24 @@ function addDay(recordData = null) {
 
     // If loading data, create sleep period elements
     const timelineDiv = document.getElementById(`timeline${dayNumber}`);
+    // recordData.sleep_periods will be an array if loaded with nested select
     if (recordData && recordData.sleep_periods && timelineDiv) {
+        // Sort periods by start time or period_id if needed for display
+        recordData.sleep_periods.sort((a, b) => timeStrToPercent(a.start_time) - timeStrToPercent(b.start_time));
+
         recordData.sleep_periods.forEach(periodData => {
+             // Calculate start and end percentages from DB time strings
             const startPercent = timeStrToPercent(periodData.start_time);
             const endPercent = timeStrToPercent(periodData.end_time);
-            // Duration from DB is source of truth, but width needs to be calculated from start/end for UI
+
+            // Calculate width percentage based on duration or end-start
+            // Using end-start (handling wrap) for UI width calculation is simpler here
             let widthPercent;
              if (endPercent >= startPercent) {
-                widthPercent = endPercent - startPercent;
-            } else { // Wraps around
-                widthPercent = (1 - startPercent) + endPercent;
-            }
+                 widthPercent = endPercent - startPercent;
+             } else { // Wraps around
+                 widthPercent = (1 - startPercent) + endPercent;
+             }
 
             const sleepPeriodEl = createSleepPeriodElement(dayNumber, startPercent * 100, widthPercent * 100, periodData.period_id, periodData.id);
             timelineDiv.appendChild(sleepPeriodEl);
@@ -292,7 +350,7 @@ function startMarkerDrag(event, elementId, dayId) {
     event.preventDefault();
     activeDrags++;
     const element = document.getElementById(elementId);
-    const parent = element.parentElement;
+    const parent = element.parentElement; // The timeline div
     if (!element || !parent) { activeDrags--; return; }
 
     const parentRect = parent.getBoundingClientRect();
@@ -300,9 +358,11 @@ function startMarkerDrag(event, elementId, dayId) {
 
     function onMouseMove(moveEvent) {
         let newLeftPx = moveEvent.clientX - shiftX - parentRect.left;
+        // Clamp position within timeline bounds
         if (newLeftPx < 0) newLeftPx = 0;
-        const maxLeftPx = parent.offsetWidth - element.offsetWidth;
+        const maxLeftPx = parent.offsetWidth - element.offsetWidth; // Markers have tiny width, element.offsetWidth is fine
         if (newLeftPx > maxLeftPx) newLeftPx = maxLeftPx;
+
         element.style.left = newLeftPx + 'px';
         updateStatistics(dayId, false); // Update UI but don't save on every mouse move
     }
@@ -311,9 +371,14 @@ function startMarkerDrag(event, elementId, dayId) {
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
         activeDrags--;
-        if (activeDrags === 0) {
-            updateStatistics(dayId, true); // Final update and save
-        }
+        // Use a small timeout before saving to allow multiple drags on different elements to finish
+        clearTimeout(saveTimeoutId);
+        saveTimeoutId = setTimeout(() => {
+            if (activeDrags === 0) {
+                 console.log("All drags finished, triggering save for day:", dayId);
+                updateStatistics(dayId, true); // Final update and save
+            }
+        }, 100); // Save after 100ms of no drag activity
     }
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
@@ -323,15 +388,26 @@ function updateSleepQuality(dayId) {
     const qualitySlider = document.getElementById(`sleepQuality${dayId}`);
     const qualityLabel = document.getElementById(`sleepQualityLabel${dayId}`);
     if (qualitySlider && qualityLabel) qualityLabel.textContent = qualitySlider.value;
-    updateStatistics(dayId, true);
+     // Debounce save for slider updates too
+    clearTimeout(saveTimeoutId);
+    saveTimeoutId = setTimeout(() => {
+         console.log("Sleep quality updated, triggering save for day:", dayId);
+        updateStatistics(dayId, true);
+    }, 100);
 }
 
 function updateMorningFatigue(dayId) {
     const fatigueSlider = document.getElementById(`morningFatigue${dayId}`);
     const fatigueLabel = document.getElementById(`morningFatigueLabel${dayId}`);
     if (fatigueSlider && fatigueLabel) fatigueLabel.textContent = fatigueSlider.value;
-    updateStatistics(dayId, true);
+     // Debounce save for slider updates too
+    clearTimeout(saveTimeoutId);
+    saveTimeoutId = setTimeout(() => {
+         console.log("Morning fatigue updated, triggering save for day:", dayId);
+        updateStatistics(dayId, true);
+    }, 100);
 }
+
 
 /**
  * Creates a DOM element for a sleep period with interactivity.
@@ -344,9 +420,15 @@ function updateMorningFatigue(dayId) {
  */
 function createSleepPeriodElement(dayId, initialLeftPercent, initialWidthPercent, periodId, dbId = null) {
     const sleepPeriod = document.createElement('div');
-    sleepPeriod.className = 'sleepPeriod';
+    sleepPeriod.className = 'sleepPeriod'; // Add this class for targeting
     sleepPeriod.style.left = `${initialLeftPercent}%`;
     sleepPeriod.style.width = `${initialWidthPercent}%`;
+    // Ensure periods don't exceed 100% width from their start point
+    if (parseFloat(sleepPeriod.style.left) + parseFloat(sleepPeriod.style.width) > 100) {
+         sleepPeriod.style.width = `${100 - parseFloat(sleepPeriod.style.left)}%`;
+         if (parseFloat(sleepPeriod.style.width) < 0) sleepPeriod.style.width = '0%'; // Should not happen with valid inputs
+    }
+
     sleepPeriod.dataset.periodId = periodId; // Client-side sequential ID for the day
     if (dbId) sleepPeriod.dataset.dbId = dbId; // DB ID if loaded
 
@@ -366,21 +448,31 @@ function createSleepPeriodElement(dayId, initialLeftPercent, initialWidthPercent
         e.preventDefault(); e.stopPropagation(); activeDrags++;
         const initialLeftPx = sleepPeriod.offsetLeft;
         const dragStartX = e.clientX;
+         const timelineWidth = timeline.offsetWidth;
 
         function onPeriodMove(moveEvent) {
             const deltaXPx = moveEvent.clientX - dragStartX;
             let newLeftPx = initialLeftPx + deltaXPx;
+            // Clamp position within timeline bounds
             if (newLeftPx < 0) newLeftPx = 0;
-            if (newLeftPx + sleepPeriod.offsetWidth > timeline.offsetWidth) {
-                newLeftPx = timeline.offsetWidth - sleepPeriod.offsetWidth;
+            if (newLeftPx + sleepPeriod.offsetWidth > timelineWidth) {
+                 newLeftPx = timelineWidth - sleepPeriod.offsetWidth;
             }
-            sleepPeriod.style.left = `${newLeftPx}px`;
+
+            sleepPeriod.style.left = `${(newLeftPx / timelineWidth) * 100}%`;
             updateStatistics(dayId, false);
         }
         function onPeriodMoveEnd() {
             document.removeEventListener('mousemove', onPeriodMove);
             document.removeEventListener('mouseup', onPeriodMoveEnd);
-            activeDrags--; if (activeDrags === 0) updateStatistics(dayId, true);
+            activeDrags--;
+            clearTimeout(saveTimeoutId);
+            saveTimeoutId = setTimeout(() => {
+                if (activeDrags === 0) {
+                     console.log("All drags finished, triggering save for day:", dayId);
+                    updateStatistics(dayId, true);
+                }
+            }, 100);
         }
         document.addEventListener('mousemove', onPeriodMove);
         document.addEventListener('mouseup', onPeriodMoveEnd);
@@ -393,6 +485,7 @@ function createSleepPeriodElement(dayId, initialLeftPercent, initialWidthPercent
             const resizeStartX = e.clientX;
             const initialPeriodLeftPx = sleepPeriod.offsetLeft;
             const initialPeriodWidthPx = sleepPeriod.offsetWidth;
+             const timelineWidth = timeline.offsetWidth;
 
             function onPeriodResize(moveEvent) {
                 const deltaXPx = moveEvent.clientX - resizeStartX;
@@ -402,27 +495,40 @@ function createSleepPeriodElement(dayId, initialLeftPercent, initialWidthPercent
                 if (isStartHandle) {
                     newLeftPx = initialPeriodLeftPx + deltaXPx;
                     newWidthPx = initialPeriodWidthPx - deltaXPx;
+                     // Clamp left and width
                     if (newLeftPx < 0) { newWidthPx += newLeftPx; newLeftPx = 0; }
                     if (newWidthPx < 5) newWidthPx = 5; // Min width 5px
-                     // Prevent crossing over right edge
+                     // Ensure right edge doesn't go past initial right edge if pulling left
                     if (newLeftPx + newWidthPx > initialPeriodLeftPx + initialPeriodWidthPx && deltaXPx > 0) {
                          newLeftPx = initialPeriodLeftPx + initialPeriodWidthPx - newWidthPx;
                     }
+
                 } else { // End handle
                     newWidthPx = initialPeriodWidthPx + deltaXPx;
-                    if (initialPeriodLeftPx + newWidthPx > timeline.offsetWidth) {
-                        newWidthPx = timeline.offsetWidth - initialPeriodLeftPx;
+                     // Clamp width and right edge
+                    if (initialPeriodLeftPx + newWidthPx > timelineWidth) {
+                        newWidthPx = timelineWidth - initialPeriodLeftPx;
                     }
-                    if (newWidthPx < 5) newWidthPx = 5;
+                    if (newWidthPx < 5) newWidthPx = 5; // Min width 5px
                 }
-                sleepPeriod.style.left = `${newLeftPx}px`;
-                sleepPeriod.style.width = `${newWidthPx}px`;
+
+                 // Apply changes as percentages
+                sleepPeriod.style.left = `${(newLeftPx / timelineWidth) * 100}%`;
+                sleepPeriod.style.width = `${(newWidthPx / timelineWidth) * 100}%`;
+
                 updateStatistics(dayId, false);
             }
             function onPeriodResizeEnd() {
                 document.removeEventListener('mousemove', onPeriodResize);
                 document.removeEventListener('mouseup', onPeriodResizeEnd);
-                activeDrags--; if (activeDrags === 0) updateStatistics(dayId, true);
+                activeDrags--;
+                clearTimeout(saveTimeoutId);
+                saveTimeoutId = setTimeout(() => {
+                    if (activeDrags === 0) {
+                         console.log("All drags finished, triggering save for day:", dayId);
+                        updateStatistics(dayId, true);
+                    }
+                }, 100);
             }
             document.addEventListener('mousemove', onPeriodResize);
             document.addEventListener('mouseup', onPeriodResizeEnd);
@@ -437,29 +543,101 @@ function createNewSleepPeriodUI(dayId) {
     const timeline = document.getElementById(`timeline${dayId}`);
     if (!timeline) return;
 
-    // Determine next period_id for this day
+    // Determine next period_id for this day (client-side index)
     const existingPeriods = timeline.querySelectorAll('.sleepPeriod');
-    const nextPeriodId = existingPeriods.length + 1;
+    let maxPeriodId = 0;
+     existingPeriods.forEach(p => {
+         const pId = parseInt(p.dataset.periodId);
+         if (!isNaN(pId) && pId > maxPeriodId) {
+             maxPeriodId = pId;
+         }
+     });
+    const nextPeriodId = maxPeriodId + 1;
 
-    // Default to a 2-hour period in the middle of the timeline or after the last period
-    let initialLeftPercent = 0.4 * 100; // 40%
-    let initialWidthPercent = (2/24) * 100; // 2 hours
+
+    // Default position: start after the last period, or default to 6 AM (0.75 percent)
+    let initialLeftPercent = 0.75 * 100; // Default start at 6 AM
+    let initialWidthPercent = (2/24) * 100; // Default 2 hours duration
 
     if (existingPeriods.length > 0) {
-        const lastPeriod = existingPeriods[existingPeriods.length - 1];
+        // Find the last period element based on its actual position (left %)
+        const sortedPeriods = Array.from(existingPeriods).sort((a, b) => {
+             const leftA = parseFloat(a.style.left);
+             const leftB = parseFloat(b.style.left);
+             return leftA - leftB; // Sort by start position
+         });
+        const lastPeriod = sortedPeriods[sortedPeriods.length - 1];
         const lastPeriodLeft = parseFloat(lastPeriod.style.left);
         const lastPeriodWidth = parseFloat(lastPeriod.style.width);
-        initialLeftPercent = lastPeriodLeft + lastPeriodWidth + 1; // 1% gap
-        if (initialLeftPercent + initialWidthPercent > 100) {
-            initialLeftPercent = 100 - initialWidthPercent;
-        }
-         if (initialLeftPercent < 0) initialLeftPercent = 0;
-    }
 
+        // Position the new period after the last one, with a small gap
+        initialLeftPercent = lastPeriodLeft + lastPeriodWidth + 1; // 1% gap
+        // Ensure the new period doesn't go off the right edge
+        if (initialLeftPercent + initialWidthPercent > 100) {
+             // If it goes off, wrap it to the beginning or position it at the end
+             // Simple approach: just place it near the end if it exceeds 100%
+             initialLeftPercent = 100 - initialWidthPercent;
+        }
+         if (initialLeftPercent < 0) initialLeftPercent = 0; // Should not happen with this logic but safety check
+    }
 
     const sleepPeriodEl = createSleepPeriodElement(dayId, initialLeftPercent, initialWidthPercent, nextPeriodId);
     timeline.appendChild(sleepPeriodEl);
-    updateStatistics(dayId, true); // Save after adding
+
+    updateStatistics(dayId, true); // Save after adding the new period
+}
+
+async function handleDeleteDayEntry(dayId) {
+    const dayEntry = document.getElementById(`dayEntry${dayId}`);
+    if (!dayEntry) return;
+
+    const dbId = dayEntry.dataset.dbId; // Get the database ID
+
+    if (dbId && currentUserId && supabase) {
+        // Confirm deletion
+        const confirmDelete = confirm(`Are you sure you want to delete Day ${dayId}? This cannot be undone.`);
+        if (!confirmDelete) return;
+
+        displayAuthMessage(`Deleting Day ${dayId}...`, "info");
+
+        // Delete from sleep_periods first (if linked by record ID)
+        // IMPORTANT: This assumes your sleep_periods table has a FK 'sleep_record_id'
+        // and appropriate RLS policies to allow the user to delete their periods.
+        const { error: periodsError } = await supabase
+            .from('sleep_periods')
+            .delete()
+            .eq('sleep_record_id', dbId); // Use the sleep record ID
+
+        if (periodsError) {
+             console.error('Error deleting sleep periods for day:', dayId, periodsError);
+             // Decide if you want to stop here or try to delete the record anyway
+             displayAuthMessage('Error deleting sleep periods for day ' + dayId + ': ' + periodsError.message, 'error');
+             return; // Stop if deleting periods failed
+        }
+
+        // Then delete the sleep_record entry
+        const { error: recordError } = await supabase
+            .from('sleep_record')
+            .delete()
+            .eq('id', dbId) // Delete by the record's primary key
+            .eq('user_id', currentUserId); // Add user_id check for safety/RLS
+
+        if (recordError) {
+            console.error('Error deleting sleep record for day:', dayId, recordError);
+            displayAuthMessage('Error deleting day ' + dayId + ': ' + recordError.message, 'error');
+        } else {
+            console.log('Day', dayId, 'and associated periods deleted successfully.');
+            dayEntry.remove(); // Remove from UI
+            updateGlobalStatistics(); // Recalculate global stats
+            displayAuthMessage(`Day ${dayId} deleted successfully.`, "success");
+             // No need to adjust localDayCounter downwards, it only increments
+        }
+    } else {
+        // If it wasn't saved to DB, just remove from UI
+        dayEntry.remove();
+         updateGlobalStatistics();
+         console.log("Removed unsaved day entry:", dayId);
+    }
 }
 
 
@@ -470,9 +648,11 @@ function createNewSleepPeriodUI(dayId) {
  * @param {boolean} shouldSave - Whether to save to Supabase after updating.
  */
 function updateStatistics(dayId, shouldSave = false) {
+    // Debounce save calls during active drags
     if (activeDrags > 0 && shouldSave) {
-        // console.log("Drag in progress, deferring save for day:", dayId);
-        return; // Don't save if a drag is still active on this or another element
+         // console.log("Drag in progress, deferring save for day:", dayId);
+         // The save will be triggered by the timeout in onMouseUp/onPeriodMoveEnd
+         return;
     }
 
     const dayEntry = document.getElementById(`dayEntry${dayId}`);
@@ -484,14 +664,33 @@ function updateStatistics(dayId, shouldSave = false) {
     const timeInBedEl = document.getElementById(`timeInBed${dayId}`);
     const totalSleepEl = document.getElementById(`totalSleep${dayId}`);
     const daySleepEfficiencyEl = document.getElementById(`daySleepEfficiency${dayId}`);
+    const sleepQualitySlider = document.getElementById(`sleepQuality${dayId}`);
+    const morningFatigueSlider = document.getElementById(`morningFatigue${dayId}`);
+    const bedtimeDisplayEl = document.getElementById(`bedtimeDisplay${dayId}`);
+    const wakeTimeDisplayEl = document.getElementById(`wakeTimeDisplay${dayId}`);
 
-    if (!timeline || !bedtimeMarker || !wakeTimeMarker || !timeInBedEl || !totalSleepEl || !daySleepEfficiencyEl) return;
+
+    if (!timeline || !bedtimeMarker || !wakeTimeMarker || !timeInBedEl || !totalSleepEl || !daySleepEfficiencyEl || !sleepQualitySlider || !morningFatigueSlider || !bedtimeDisplayEl || !wakeTimeDisplayEl) {
+         console.warn(`Elements for day ${dayId} not found for statistics update.`);
+         return;
+    }
+
 
     const timelineWidthPx = timeline.offsetWidth;
-    if (timelineWidthPx === 0) return; // Avoid division by zero if not rendered
+    if (timelineWidthPx === 0) {
+         // console.warn(`Timeline width is 0px for day ${dayId}, skipping statistics update.`);
+         return; // Avoid division by zero if not rendered yet
+    }
+
 
     const bedtimePercent = bedtimeMarker.offsetLeft / timelineWidthPx;
     const wakeTimePercent = wakeTimeMarker.offsetLeft / timelineWidthPx;
+
+    const bedtimeStr = percentToTimeStr(bedtimePercent).substring(0, 5); // Get HH:MM part
+    const wakeTimeStr = percentToTimeStr(wakeTimePercent).substring(0, 5); // Get HH:MM part
+
+    if(bedtimeDisplayEl) bedtimeDisplayEl.textContent = bedtimeStr;
+    if(wakeTimeDisplayEl) wakeTimeDisplayEl.textContent = wakeTimeStr;
 
     const tibHours = calculateHoursFromPercents(bedtimePercent, wakeTimePercent);
     timeInBedEl.textContent = tibHours.toFixed(1);
@@ -499,11 +698,11 @@ function updateStatistics(dayId, shouldSave = false) {
     let totalSleepHours = 0;
     const sleepPeriodElements = timeline.getElementsByClassName('sleepPeriod');
     for (const period of sleepPeriodElements) {
-        const periodStartPercent = period.offsetLeft / timelineWidthPx;
-        const periodWidthPercent = period.offsetWidth / timelineWidthPx;
-        // For duration, it's simpler: width is duration if it doesn't wrap.
-        // Our periods are single blocks, so their width directly translates to duration.
-        totalSleepHours += periodWidthPercent * 24;
+        // const periodStartPercent = period.offsetLeft / timelineWidthPx;
+        // const periodEndPercent = (period.offsetLeft + period.offsetWidth) / timelineWidthPx;
+        // Calculate duration based on percentage width (simplified for non-wrapping periods)
+        const periodDurationHours = (period.offsetWidth / timelineWidthPx) * 24;
+        totalSleepHours += periodDurationHours;
     }
     totalSleepEl.textContent = totalSleepHours.toFixed(1);
 
@@ -515,10 +714,25 @@ function updateStatistics(dayId, shouldSave = false) {
     }
     daySleepEfficiencyEl.textContent = efficiency.toFixed(0);
 
+    // Also update quality/fatigue labels if input triggered this update
+     const qualityLabel = document.getElementById(`sleepQualityLabel${dayId}`);
+     const fatigueLabel = document.getElementById(`morningFatigueLabel${dayId}`);
+     if (qualityLabel) qualityLabel.textContent = sleepQualitySlider.value;
+     if (fatigueLabel) fatigueLabel.textContent = morningFatigueSlider.value;
+
+
     updateGlobalStatistics(); // Update overall averages displayed at the top
 
-    if (shouldSave && currentUserId && supabase) {
-        saveSleepRecordToSupabase(dayId);
+    if (shouldSave) {
+         // Use a slight delay before saving to allow multiple updates (e.g., adding multiple periods quickly)
+         clearTimeout(saveTimeoutId);
+         saveTimeoutId = setTimeout(() => {
+            if (activeDrags === 0) { // Only save if no drags are currently active
+                saveSleepRecordToSupabase(dayId);
+            } else {
+                 console.log("Save for day", dayId, "deferred due to active drags.");
+            }
+         }, 200); // Wait 200ms before saving
     }
 }
 
@@ -529,258 +743,247 @@ function updateGlobalStatistics() {
 
     dayEntries.forEach(dayEntry => {
         const dayId = dayEntry.dataset.dayId;
-        if (!dayId) return;
-        const tib = parseFloat(document.getElementById(`timeInBed${dayId}`)?.textContent);
-        const sleep = parseFloat(document.getElementById(`totalSleep${dayId}`)?.textContent);
-        const efficiency = parseFloat(document.getElementById(`daySleepEfficiency${dayId}`)?.textContent);
-        const quality = parseInt(document.getElementById(`sleepQuality${dayId}`)?.value);
-        const fatigue = parseInt(document.getElementById(`morningFatigue${dayId}`)?.value);
+        if (!dayId) return; // Skip if dayId is missing
 
-        if (![tib, sleep, efficiency, quality, fatigue].some(isNaN)) {
+        const tibEl = document.getElementById(`timeInBed${dayId}`);
+        const sleepEl = document.getElementById(`totalSleep${dayId}`);
+        const efficiencyEl = document.getElementById(`daySleepEfficiency${dayId}`);
+        const qualityEl = document.getElementById(`sleepQuality${dayId}`);
+        const fatigueEl = document.getElementById(`morningFatigue${dayId}`);
+
+         if (!tibEl || !sleepEl || !efficiencyEl || !qualityEl || !fatigueEl) {
+             console.warn(`Skipping global stats for day ${dayId} due to missing elements.`);
+             return;
+         }
+
+        const tib = parseFloat(tibEl.textContent);
+        const sleep = parseFloat(sleepEl.textContent);
+        const efficiency = parseFloat(efficiencyEl.textContent);
+        const quality = parseInt(qualityEl.value);
+        const fatigue = parseInt(fatigueEl.value);
+
+        if (!isNaN(tib) && !isNaN(sleep) && !isNaN(efficiency) && !isNaN(quality) && !isNaN(fatigue)) {
+             // Only include days where all core stats could be calculated
             totalTIB += tib;
             totalSleep += sleep;
             totalEfficiency += efficiency;
             totalSleepQuality += quality;
             totalMorningFatigue += fatigue;
             validDaysCount++;
+        } else {
+             console.warn(`Skipping global stats for day ${dayId} due to invalid data (NaN).`);
         }
     });
 
     if (validDaysCount > 0) {
-        document.getElementById("avgTIB").textContent = (totalTIB / validDaysCount).toFixed(1);
-        document.getElementById("avgSleep").textContent = (totalSleep / validDaysCount).toFixed(1);
-        document.getElementById("avgSleepEfficiency").textContent = (totalEfficiency / validDaysCount).toFixed(0);
-        document.getElementById("avgSleepQuality").textContent = (totalSleepQuality / validDaysCount).toFixed(1);
-        document.getElementById("avgMorningFatigue").textContent = (totalMorningFatigue / validDaysCount).toFixed(1);
+        // Ensure DOM elements exist before updating
+        if (document.getElementById("avgTIB")) document.getElementById("avgTIB").textContent = (totalTIB / validDaysCount).toFixed(1);
+        if (document.getElementById("avgSleep")) document.getElementById("avgSleep").textContent = (totalSleep / validDaysCount).toFixed(1);
+        if (document.getElementById("avgSleepEfficiency")) document.getElementById("avgSleepEfficiency").textContent = (totalEfficiency / validDaysCount).toFixed(0);
+        if (document.getElementById("avgSleepQuality")) document.getElementById("avgSleepQuality").textContent = (totalSleepQuality / validDaysCount).toFixed(1);
+        if (document.getElementById("avgMorningFatigue")) document.getElementById("avgMorningFatigue").textContent = (totalMorningFatigue / validDaysCount).toFixed(1);
     } else {
         resetGlobalStatistics();
     }
 }
 
 function resetGlobalStatistics() {
-    document.getElementById("avgTIB").textContent = '0';
-    document.getElementById("avgSleep").textContent = '0';
-    document.getElementById("avgSleepEfficiency").textContent = '0';
-    document.getElementById("avgSleepQuality").textContent = '0';
-    document.getElementById("avgMorningFatigue").textContent = '0';
+    // Ensure DOM elements exist before resetting
+    if (document.getElementById("avgTIB")) document.getElementById("avgTIB").textContent = '0';
+    if (document.getElementById("avgSleep")) document.getElementById("avgSleep").textContent = '0';
+    if (document.getElementById("avgSleepEfficiency")) document.getElementById("avgSleepEfficiency").textContent = '0';
+    if (document.getElementById("avgSleepQuality")) document.getElementById("avgSleepQuality").textContent = '0';
+    if (document.getElementById("avgMorningFatigue")) document.getElementById("avgMorningFatigue").textContent = '0';
 }
 
-// --- Supabase Data Persistence ---
 async function saveSleepRecordToSupabase(dayId) {
-    if (!currentUserId || !supabase) return;
+    // CRITICAL CHECK: Ensure user is logged in before saving
+    if (!currentUserId || !supabase) {
+        console.error("Cannot save sleep record: User not logged in or Supabase client not initialized.");
+        displayAuthMessage("Save failed: You are not logged in.", "error");
+        return;
+    }
+
     const dayEntryElement = document.getElementById(`dayEntry${dayId}`);
-    if (!dayEntryElement) return;
+    if (!dayEntryElement) {
+        console.error(`Cannot save sleep record: Day entry element not found for day ID ${dayId}.`);
+        return;
+    }
 
     const timeline = document.getElementById(`timeline${dayId}`);
     const bedtimeMarker = document.getElementById(`bedtime${dayId}`);
     const wakeTimeMarker = document.getElementById(`wakeTime${dayId}`);
-    if (!timeline || !bedtimeMarker || !wakeTimeMarker || timeline.offsetWidth === 0) return;
+    const sleepQualitySlider = document.getElementById(`sleepQuality${dayId}`);
+    const morningFatigueSlider = document.getElementById(`morningFatigue${dayId}`);
+    const totalSleepEl = document.getElementById(`totalSleep${dayId}`);
+    const daySleepEfficiencyEl = document.getElementById(`daySleepEfficiency${dayId}`);
+
+
+    if (!timeline || !bedtimeMarker || !wakeTimeMarker || timeline.offsetWidth === 0 || !sleepQualitySlider || !morningFatigueSlider || !totalSleepEl || !daySleepEfficiencyEl) {
+        console.warn(`Elements for day ${dayId} not ready for save (timeline width 0 or markers/sliders/stats missing).`);
+        return;
+    }
 
     const timelineWidthPx = timeline.offsetWidth;
     const bedtimePercent = bedtimeMarker.offsetLeft / timelineWidthPx;
     const wakeTimePercent = wakeTimeMarker.offsetLeft / timelineWidthPx;
 
+    const dayCountInt = parseInt(dayId);
+    if (isNaN(dayCountInt)) {
+        console.error(`Invalid day ID "${dayId}" for saving.`);
+        return;
+    }
+
     const recordPayload = {
         user_id: currentUserId,
-        day_count: parseInt(dayId),
+        day_count: dayCountInt,
         bedtime: percentToTimeStr(bedtimePercent),
         wake_time: percentToTimeStr(wakeTimePercent),
         time_in_bed: parseFloat(document.getElementById(`timeInBed${dayId}`).textContent),
-        sleep_quality: parseInt(document.getElementById(`sleepQuality${dayId}`).value),
-        morning_fatigue: parseInt(document.getElementById(`morningFatigue${dayId}`).value),
+        sleep_quality: parseInt(sleepQualitySlider.value),
+        morning_fatigue: parseInt(morningFatigueSlider.value),
+        total_sleep_time: parseFloat(totalSleepEl.textContent),
+        sleep_efficiency: parseFloat(daySleepEfficiencyEl.textContent),
         // created_at and updated_at can be handled by Supabase (e.g. default now())
     };
 
+    if (isNaN(recordPayload.time_in_bed) || isNaN(recordPayload.sleep_quality) || isNaN(recordPayload.morning_fatigue) || isNaN(recordPayload.total_sleep_time) || isNaN(recordPayload.sleep_efficiency)) {
+        console.error(`Calculated values for day ${dayId} are invalid, skipping save.`, recordPayload);
+        displayAuthMessage(`Error: Invalid data calculated for Day ${dayId}. Save aborted.`, 'error');
+        return;
+    }
+
     let recordDbId = dayEntryElement.dataset.dbId;
-    if (recordDbId) recordPayload.id = parseInt(recordDbId); // Include ID if updating
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (recordDbId && (typeof recordDbId !== 'string' || !uuidRegex.test(recordDbId))) {
+        console.warn(`Day ${dayId}: Invalid value "${recordDbId}" found in dataset.dbId. Expected UUID string. Treating as a new record.`);
+        recordDbId = null;
+    }
+
+    const finalPayload = recordPayload;
+    if (recordDbId) {
+        finalPayload.id = recordDbId;
+    }
 
     const { data: savedRecord, error: recordError } = await supabase
         .from('sleep_record')
-        .upsert(recordPayload, { onConflict: 'user_id, day_count', ignoreDuplicates: false }) // Assumes unique constraint on (user_id, day_count) or use PK if available
+        .upsert(finalPayload, { onConflict: 'user_id, day_count', ignoreDuplicates: false })
         .select('id')
         .single();
 
     if (recordError) {
         console.error('Error saving sleep record:', recordError);
-        displayAuthMessage('Error saving day data: ' + recordError.message, 'error');
+        if (recordError.code === '23503' && recordError.constraint === 'sleep_record_user_id_fkey') {
+             displayAuthMessage('Save failed: User account issue. Please try logging out and back in.', 'error');
+        } else if (recordError.code === '22P02') {
+             displayAuthMessage('Save failed: Data format error. Please check day data.', 'error');
+        }
+        else {
+             displayAuthMessage('Error saving day data: ' + recordError.message, 'error');
+        }
     } else if (savedRecord && savedRecord.id) {
-        dayEntryElement.dataset.dbId = savedRecord.id; // Store/update the DB ID
-        // console.log(`Sleep record for day ${dayId} saved/updated with DB ID: ${savedRecord.id}`);
-        await saveSleepPeriodsToSupabase(dayId, savedRecord.id); // Save associated periods
+        const newRecordDbId = savedRecord.id;
+        dayEntryElement.dataset.dbId = newRecordDbId;
+        console.log(`Sleep record for day ${dayId} saved/updated with DB ID: ${newRecordDbId}`);
+        await saveSleepPeriodsToSupabase(dayId, newRecordDbId);
+        dayEntryElement.classList.add('border-green-500');
+        setTimeout(() => dayEntryElement.classList.remove('border-green-500'), 1000);
+        displayAuthMessage("Sleep diary saved.", "success");
+    } else {
+        console.error("Upsert succeeded but did not return an ID for day", dayId);
+        displayAuthMessage("Save completed, but could not retrieve record ID.", "warning");
     }
 }
 
 async function saveSleepPeriodsToSupabase(dayId, sleepRecordDbId) {
-    if (!currentUserId || !supabase || !sleepRecordDbId) return;
+    if (!currentUserId || !supabase || !sleepRecordDbId) {
+        console.error("Cannot save sleep periods: User not logged in or sleep record ID is missing.");
+        return;
+    }
 
     const timeline = document.getElementById(`timeline${dayId}`);
-    if (!timeline || timeline.offsetWidth === 0) return;
+    if (!timeline || timeline.offsetWidth === 0) {
+        console.warn(`Timeline width is 0px for day ${dayId}, skipping sleep periods save.`);
+        return;
+    }
     const timelineWidthPx = timeline.offsetWidth;
 
-    // Delete existing periods for this sleep_record (identified by user_id and day_count, or sleepRecordDbId)
-    // Simpler to use sleepRecordDbId if your sleep_periods table had a direct FK.
-    // Given current schema, linking by user_id and day_count.
     const { error: deleteError } = await supabase
         .from('sleep_periods')
         .delete()
-        .eq('user_id', currentUserId)
-        .eq('day_count', parseInt(dayId));
+        .eq('sleep_record_id', sleepRecordDbId);
 
     if (deleteError) {
-        console.error('Error deleting old sleep periods:', deleteError);
-        // Decide if you want to stop or try to insert new ones anyway
+        console.error('Error deleting old sleep periods for record', sleepRecordDbId, ':', deleteError);
+        displayAuthMessage('Error saving sleep periods: Could not clear old data. ' + deleteError.message, 'error');
     }
 
     const sleepPeriodElements = timeline.querySelectorAll('.sleepPeriod');
     const periodsToSave = [];
+
     sleepPeriodElements.forEach(el => {
         const startPercent = el.offsetLeft / timelineWidthPx;
-        const endPercent = (el.offsetLeft + el.offsetWidth) / timelineWidthPx; // End is start + width
+        const endPercent = (el.offsetLeft + el.offsetWidth) / timelineWidthPx;
+
+        const startPercentNormalized = (startPercent % 1 + 1) % 1;
+        const endPercentNormalized = (endPercent % 1 + 1) % 1;
 
         periodsToSave.push({
+            sleep_record_id: sleepRecordDbId,
             user_id: currentUserId,
-            day_count: parseInt(dayId),
-            period_id: parseInt(el.dataset.periodId), // Client-side sequential ID
+            period_id: parseInt(el.dataset.periodId),
             start_time: percentToTimeStr(startPercent),
             end_time: percentToTimeStr(endPercent),
-            duration: calculateHoursFromPercents(startPercent, endPercent)
-            // id: if this period was loaded, el.dataset.dbId might exist.
-            // For upsert, you'd include it. For delete-then-insert, it's not needed for insert.
+            duration: calculateHoursFromPercents(startPercentNormalized, endPercentNormalized)
         });
     });
 
     if (periodsToSave.length > 0) {
-        const { data, error: periodsError } = await supabase.from('sleep_periods').insert(periodsToSave).select('id, period_id');
+         console.log(`Saving ${periodsToSave.length} sleep periods for record ${sleepRecordDbId}:`, periodsToSave);
+        const { data, error: periodsError } = await supabase
+            .from('sleep_periods')
+            .insert(periodsToSave)
+            .select('id, period_id');
+
         if (periodsError) {
             console.error('Error saving sleep periods:', periodsError);
+             displayAuthMessage('Error saving sleep periods: ' + periodsError.message, 'error');
         } else {
-            // console.log('Sleep periods saved:', data);
-            // Optional: update dataset.dbId on each sleep period element if needed for fine-grained updates later
-            data.forEach(savedP => {
-                const el = timeline.querySelector(`.sleepPeriod[data-period-id="${savedP.period_id}"]`);
-                if (el) el.dataset.dbId = savedP.id;
-            });
+             console.log('Sleep periods saved successfully:', data);
+             if (data && data.length > 0) {
+                 data.forEach(savedPeriod => {
+                     const el = timeline.querySelector(`.sleepPeriod[data-period-id="${savedPeriod.period_id}"]`);
+                     if (el && savedPeriod.id) {
+                         el.dataset.dbId = savedPeriod.id;
+                     }
+                 });
+             }
         }
-    }
-}
-
-async function loadUserData() {
-    if (!supabase || !currentUserId) return;
-    displayAuthMessage("Loading your sleep diary...", "info");
-
-    const { data: records, error } = await supabase
-        .from('sleep_record')
-        .select(`
-            *,
-            sleep_periods (*)
-        `)
-        .eq('user_id', currentUserId)
-        .order('day_count', { ascending: false }); // Load newest first
-
-    if (error) {
-        console.error('Error loading user data:', error);
-        displayAuthMessage('Error loading your data: ' + error.message, 'error');
-        return;
-    }
-
-    if (diaryDiv) diaryDiv.innerHTML = ''; // Clear existing entries
-    localDayCounter = 0; // Reset counter
-
-    if (records && records.length > 0) {
-        records.forEach(record => {
-            addDay(record); // addDay will handle populating UI and setting localDayCounter
-        });
-        displayAuthMessage("Diary loaded.", "success");
     } else {
-        displayAuthMessage("No sleep entries found. Add your first day!", "info");
-        // Optionally add a blank day 1 if no records
-        // addDay();
+        console.log(`No sleep periods to save for record ${sleepRecordDbId}.`);
     }
-    updateGlobalStatistics();
-}
-
-async function handleDeleteDayEntry(dayId) {
-    if (!confirm(`Are you sure you want to delete Day ${dayId}? This action cannot be undone.`)) return;
-
-    const dayEntryElement = document.getElementById(`dayEntry${dayId}`);
-    const sleepRecordDbId = dayEntryElement?.dataset.dbId;
-
-    if (sleepRecordDbId && supabase && currentUserId) {
-        // Delete associated sleep periods first (based on user_id and day_count)
-        const { error: periodError } = await supabase.from('sleep_periods')
-            .delete()
-            .eq('user_id', currentUserId)
-            .eq('day_count', parseInt(dayId));
-
-        if (periodError) {
-            console.error(`Error deleting sleep periods for day ${dayId}:`, periodError);
-            displayAuthMessage('Error deleting associated sleep periods: ' + periodError.message, 'error');
-            // Optionally stop here or proceed to delete the main record
-        }
-
-        // Then delete the main sleep record
-        const { error: recordError } = await supabase.from('sleep_record').delete().eq('id', sleepRecordDbId);
-        if (recordError) {
-            console.error(`Error deleting sleep record ${sleepRecordDbId} from database:`, recordError);
-            displayAuthMessage('Error deleting day record: ' + recordError.message, 'error');
-            return; // Don't remove from UI if DB delete failed
-        }
-    }
-
-    if (dayEntryElement) {
-        dayEntryElement.remove();
-        updateGlobalStatistics(); // Recalculate global stats
-        displayAuthMessage(`Day ${dayId} deleted.`, "success");
-    }
-     // Adjust localDayCounter if the deleted day was the highest
-    const remainingDayEntries = diaryDiv.querySelectorAll('.day');
-    let maxDayNum = 0;
-    remainingDayEntries.forEach(entry => {
-        const num = parseInt(entry.dataset.dayId);
-        if (num > maxDayNum) maxDayNum = num;
-    });
-    localDayCounter = maxDayNum;
 }
 
 
-// --- Event Listeners Setup ---
-document.addEventListener('DOMContentLoaded', () => {
-    if (!supabase) {
-        console.error("Supabase client failed to initialize. App will not function correctly.");
-        updateUserUI(null); // Show logged-out state
-        if(addDayButton) addDayButton.disabled = true;
-        return;
-    }
+// --- Event Listeners ---
+signupButton?.addEventListener("click", handleSignUp);
+loginButton?.addEventListener("click", handleLogin);
+logoutButton?.addEventListener("click", handleLogout);
+addDayButton?.addEventListener("click", () => addDay()); // Add a new empty day
 
-    signupButton?.addEventListener('click', handleSignUp);
-    loginButton?.addEventListener('click', handleLogin);
-    logoutButton?.addEventListener('click', handleLogout);
-    addDayButton?.addEventListener('click', () => addDay()); // Add a new blank day
-
-    // Listen to auth state changes
+// --- Auth State Change Listener ---
+if (supabase && supabase.auth) {
     supabase.auth.onAuthStateChange((event, session) => {
-        // console.log("Auth event:", event, session);
-        const user = session?.user ?? null;
-        updateUserUI(user);
-        if (event === 'SIGNED_OUT') {
-            if (diaryDiv) diaryDiv.innerHTML = '';
-            resetGlobalStatistics();
-            localDayCounter = 0;
-        } else if (event === 'SIGNED_IN') {
-            // loadUserData is called within updateUserUI if user is present
-        }
+        console.log("Auth state changed:", event, session);
+        updateUserUI(session?.user);
     });
 
-    // Check initial auth state in case user is already logged in
+    // Initial check on page load
     supabase.auth.getSession().then(({ data: { session } }) => {
-        const user = session?.user ?? null;
-        updateUserUI(user);
-        if (!user && addDayButton) { // Ensure add day button is disabled if no initial session
-            addDayButton.disabled = true;
-        }
-    }).catch(error => {
-        console.error("Error getting initial session:", error);
-        updateUserUI(null);
-         if(addDayButton) addDayButton.disabled = true;
+        updateUserUI(session?.user);
     });
-});
+}
+
+
+// Ensure global stats are updated on page load even if not logged in initially (will reset to 0)
+resetGlobalStatistics();
